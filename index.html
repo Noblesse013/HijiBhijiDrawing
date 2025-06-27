@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>HandTrack Paint (Smoothed)</title>
+  <title>HandTrack Paint</title>
   <script src="https://cdn.jsdelivr.net/npm/handtrackjs/dist/handtrack.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -69,19 +69,14 @@
     let prevX = null, prevY = null;
     let pointerColor = 'red';
 
-    function getRandomColor() {
-      return '#' + [...Array(6)].map(() => "0123456789ABCDEF"[Math.floor(Math.random() * 16)]).join('');
-    }
+    const getRandomColor = () =>
+      '#' + [...Array(6)].map(() => "0123456789ABCDEF"[Math.floor(Math.random() * 16)]).join('');
 
-    function resetDrawing() {
+    const resetDrawing = () => {
       prevX = prevY = null;
-    }
+    };
 
-    function lerp(a, b, t) {
-      return a + (b - a) * t;
-    }
-
-    function drawFromHand(x, y, { isClosed = false, isOpen = false } = {}) {
+    const drawFromHand = (x, y, { isClosed = false, isOpen = false } = {}) => {
       if (isOpen) {
         drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
         resetDrawing();
@@ -98,35 +93,26 @@
         prevY = y;
       }
 
-      const smoothX = lerp(prevX, x, 0.2);
-      const smoothY = lerp(prevY, y, 0.2);
-
       drawCtx.strokeStyle = pointerColor;
       drawCtx.lineWidth = 3;
       drawCtx.lineCap = 'round';
       drawCtx.beginPath();
       drawCtx.moveTo(prevX, prevY);
-      drawCtx.lineTo(smoothX, smoothY);
+      drawCtx.lineTo(x, y);
       drawCtx.stroke();
 
-      // Optional: draw cursor dot
-      drawCtx.beginPath();
-      drawCtx.arc(smoothX, smoothY, 4, 0, Math.PI * 2);
-      drawCtx.fillStyle = pointerColor;
-      drawCtx.fill();
+      prevX = x;
+      prevY = y;
+    };
 
-      prevX = smoothX;
-      prevY = smoothY;
-    }
-
-    function processPredictions(predictions, model) {
+    const processPredictions = (predictions, model) => {
       liveCtx.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
       model.renderPredictions(predictions, liveCanvas, liveCtx, video);
 
       const gestures = {
-        open: predictions.find(p => p.label === "open" && p.score > 0.8),
-        closed: predictions.find(p => p.label === "closed" && p.score > 0.8),
-        point: predictions.find(p => p.label === "point" && p.score > 0.85),
+        open: predictions.find(p => p.label === "open"),
+        closed: predictions.find(p => p.label === "closed"),
+        point: predictions.find(p => p.label === "point"),
       };
 
       if (gestures.open) {
@@ -134,9 +120,9 @@
         return;
       }
 
-      const gesture = gestures.closed || gestures.point;
-      if (gesture) {
-        const [x, y, w, h] = gesture.bbox;
+      const activeGesture = gestures.closed || gestures.point;
+      if (activeGesture) {
+        const [x, y, w, h] = activeGesture.bbox;
         const centerX = (x + w / 2) / video.videoWidth * drawCanvas.width;
         const centerY = (y + h / 2) / video.videoHeight * drawCanvas.height;
         drawFromHand(centerX, centerY, {
@@ -146,20 +132,17 @@
       } else {
         resetDrawing();
       }
-    }
+    };
 
-    async function detectLoop(model) {
-      const predictions = await model.detect(video);
-      processPredictions(predictions, model);
-      requestAnimationFrame(() => detectLoop(model));
-    }
-
-    async function runHandTracking() {
+    const runHandTracking = async () => {
       const model = await handTrack.load(modelParams);
-      detectLoop(model);
-    }
+      setInterval(async () => {
+        const predictions = await model.detect(video);
+        processPredictions(predictions, model);
+      }, 100);
+    };
 
-    async function startVideoFeed() {
+    const startVideoFeed = async () => {
       const status = await handTrack.startVideo(video);
       if (status) {
         await navigator.mediaDevices.getUserMedia({ video: true });
@@ -167,8 +150,9 @@
       } else {
         alert("Please enable video access.");
       }
-    }
+    };
 
+    // Save drawing function
     function saveDrawing() {
       const link = document.createElement('a');
       link.download = 'handtrack_drawing.png';
@@ -176,7 +160,7 @@
       link.click();
     }
 
-    // Launch
+    // Start everything
     startVideoFeed();
   </script>
 </body>
