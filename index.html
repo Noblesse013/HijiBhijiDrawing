@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>HandTrack Paint (Smoothed)</title>
+  <script src="https://cdn.jsdelivr.net/npm/handtrackjs/dist/handtrack.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; font-family: sans-serif; }
+    .container { display: flex; width: 100vw; height: 100vh; }
+    #drawCanvas { flex: 1; background: white; }
+    .video-section { flex: 1; position: relative; background: black; }
+    video, #liveCanvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    .toolbar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+    }
+    .toolbar button {
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 8px;
+      background: #333;
+      color: white;
+      border: none;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Save Button -->
+  <div class="toolbar">
+    <button onclick="saveDrawing()">Save Drawing</button>
+  </div>
+
+  <!-- Canvas and Video Layout -->
+  <div class="container">
+    <canvas id="drawCanvas"></canvas>
+    <div class="video-section">
+      <video id="video" autoplay muted></video>
+      <canvas id="liveCanvas"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const drawCanvas = document.getElementById('drawCanvas');
+    const drawCtx = drawCanvas.getContext('2d');
+    const video = document.getElementById('video');
+    const liveCanvas = document.getElementById('liveCanvas');
+    const liveCtx = liveCanvas.getContext('2d');
+
+    drawCanvas.width = liveCanvas.width = window.innerWidth / 2;
+    drawCanvas.height = liveCanvas.height = window.innerHeight;
+
+    const modelParams = {
+      flipHorizontal: true,
+      maxNumBoxes: 5,
+      iouThreshold: 0.5,
+      scoreThreshold: 0.6,
+    };
+
+    let prevX = null, prevY = null;
+    let pointerColor = 'red';
+
+    function getRandomColor() {
+      return '#' + [...Array(6)].map(() => "0123456789ABCDEF"[Math.floor(Math.random() * 16)]).join('');
+    }
+
+    function resetDrawing() {
+      prevX = prevY = null;
+    }
+
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    function drawFromHand(x, y, { isClosed = false, isOpen = false } = {}) {
+      if (isOpen) {
+        drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+        resetDrawing();
+        return;
+      }
+
+      if (isClosed) {
+        pointerColor = getRandomColor();
+        return;
+      }
+
+      if (prevX === null || prevY === null) {
+        prevX = x;
+        prevY = y;
+      }
+
+      const smoothX = lerp(prevX, x, 0.2);
+      const smoothY = lerp(prevY, y, 0.2);
+
+      drawCtx.strokeStyle = pointerColor;
+      drawCtx.lineWidth = 3;
+      drawCtx.lineCap = 'round';
+      drawCtx.beginPath();
+      drawCtx.moveTo(prevX, prevY);
+      drawCtx.lineTo(smoothX, smoothY);
+      drawCtx.stroke();
+
+      // Optional: draw cursor dot
+      drawCtx.beginPath();
+      drawCtx.arc(smoothX, smoothY, 4, 0, Math.PI * 2);
+      drawCtx.fillStyle = pointerColor;
+      drawCtx.fill();
+
+      prevX = smoothX;
+      prevY = smoothY;
+    }
+
+    function processPredictions(predictions, model) {
+      liveCtx.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
+      model.renderPredictions(predictions, liveCanvas, liveCtx, video);
+
+      const gestures = {
+        open: predictions.find(p => p.label === "open" && p.score > 0.8),
+        closed: predictions.find(p => p.label === "closed" && p.score > 0.8),
+        point: predictions.find(p => p.label === "point" && p.score > 0.85),
+      };
+
+      if (gestures.open) {
+        drawFromHand(0, 0, { isOpen: true });
+        return;
+      }
+
+      const gesture = gestures.closed || gestures.point;
+      if (gesture) {
+        const [x, y, w, h] = gesture.bbox;
+        const centerX = (x + w / 2) / video.videoWidth * drawCanvas.width;
+        const centerY = (y + h / 2) / video.videoHeight * drawCanvas.height;
+        drawFromHand(centerX, centerY, {
+          isClosed: !!gestures.closed,
+          isOpen: false,
+        });
+      } else {
+        resetDrawing();
+      }
+    }
+
+    async function detectLoop(model) {
+      const predictions = await model.detect(video);
+      processPredictions(predictions, model);
+      requestAnimationFrame(() => detectLoop(model));
+    }
+
+    async function runHandTracking() {
+      const model = await handTrack.load(modelParams);
+      detectLoop(model);
+    }
+
+    async function startVideoFeed() {
+      const status = await handTrack.startVideo(video);
+      if (status) {
+        await navigator.mediaDevices.getUserMedia({ video: true });
+        runHandTracking();
+      } else {
+        alert("Please enable video access.");
+      }
+    }
+
+    function saveDrawing() {
+      const link = document.createElement('a');
+      link.download = 'handtrack_drawing.png';
+      link.href = drawCanvas.toDataURL('image/png');
+      link.click();
+    }
+
+    // Launch
+    startVideoFeed();
+  </script>
+</body>
+</html>
